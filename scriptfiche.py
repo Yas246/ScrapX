@@ -6,7 +6,7 @@ from datetime import datetime
 import re
 import argparse
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import json
 import time
 import os
@@ -74,11 +74,13 @@ class ProductScraper:
             # Extraction du contenu principal
             content = self._extract_main_content(soup)
             title = self._extract_title(soup)
+            image_url = self._extract_product_image(soup)
             
             return {
                 'url': url,
                 'title': title,
                 'content': content,
+                'image_url': image_url,
                 'raw_html': str(soup)
             }
             
@@ -121,6 +123,51 @@ class ProductScraper:
         
         return soup.get_text(separator=' ', strip=True)
 
+    def _extract_product_image(self, soup):
+        """Extrait l'URL de l'image principale du produit."""
+        # Sélecteurs spécifiques aux images de produits
+        image_selectors = [
+            # Sélecteurs Open Graph et Twitter
+            'meta[property="og:image"]',
+            'meta[name="twitter:image"]',
+            # Sélecteurs spécifiques aux sites e-commerce
+            '#landingImage',  # Amazon
+            '#main-image',    # Commun
+            '.product-image-main img',
+            '.product-featured-image',
+            '.gallery-image--default',
+            '[data-main-image]',
+            # Sélecteurs génériques pour images de produits
+            '.product-image img',
+            '.primary-image',
+            '.main-product-image',
+            # Fallback sur première image pertinente
+            'img[itemprop="image"]',
+            '.product img:first-of-type'
+        ]
+        
+        for selector in image_selectors:
+            element = soup.select_one(selector)
+            if element:
+                # Extraire l'URL selon le type d'élément
+                if element.name == 'meta':
+                    image_url = element.get('content')
+                else:
+                    # Chercher d'abord data-src pour les images lazy-loaded
+                    image_url = element.get('data-src') or element.get('src')
+                
+                if image_url:
+                    # Nettoyer l'URL
+                    image_url = image_url.split('?')[0]  # Retirer les paramètres
+                    # S'assurer que l'URL est absolue
+                    if not image_url.startswith(('http://', 'https://')):
+                        base_url = soup.find('base', href=True)
+                        if base_url:
+                            image_url = urljoin(base_url['href'], image_url)
+                    return image_url
+        
+        return None
+
     def generate_product_sheet(self, article_data):
         """Génère une fiche produit à partir d'UN SEUL article"""
         try:
@@ -152,7 +199,7 @@ Tu es un expert en rédaction de fiches produits techniques. À partir de l'arti
     "name": "Nom complet du produit avec toutes ses caractéristiques",
     "brand": "Marque du produit",
     "model": "Modèle exact du produit",
-    "image": "URL de l'image principale (si trouvée dans l'article)",
+    "image": "{article_data.get('image_url', '')}",
     "amazonASIN": "ASIN_PLACEHOLDER",
     "publishDate": "{datetime.now().strftime('%Y-%m-%d')}",
     "updateDate": "{datetime.now().strftime('%Y-%m-%d')}",
@@ -338,9 +385,8 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
             product_sheet = self.process_single_url(url)
             
             if product_sheet:
-                # Générer un nom de fichier unique basé sur l'URL
-                filename = self._generate_filename_from_url(url, i)
-                filepath = self.save_to_file(product_sheet, filename)
+                # Laisser save_to_file générer le nom basé sur brand et model
+                filepath = self.save_to_file(product_sheet)
                 
                 if filepath:
                     results.append({
@@ -369,30 +415,21 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
         
         return results
 
-    def _generate_filename_from_url(self, url, index):
-        """Génère un nom de fichier unique basé sur l'URL"""
-        try:
-            # Extraire le domaine de l'URL
-            parsed_url = urlparse(url)
-            domain = parsed_url.netloc.replace('www.', '').replace('.', '_')
-            
-            # Extraire une partie du chemin
-            path_parts = [part for part in parsed_url.path.split('/') if part]
-            path_identifier = '_'.join(path_parts[:2]) if path_parts else 'article'
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            filename = f"fiche_{domain}_{path_identifier}_{index}_{timestamp}.mdx"
-            
-            # Nettoyer le nom de fichier
-            filename = re.sub(r'[^\w\-_\.]', '_', filename)
-            
-            return filename
-            
-        except Exception:
-            # Fallback si l'extraction échoue
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            return f"fiche_produit_{index}_{timestamp}.mdx"
+    def _slugify(self, text):
+        """Convertit un texte en slug (caractères simples, sans accents, avec tirets)."""
+        # Convertir en minuscules
+        text = text.lower()
+        # Remplacer les caractères accentués
+        text = re.sub(r'[àáâãäçèéêëìíîïñòóôõöùúûüýÿ]', 
+                     lambda m: 'aaaaaceeeeiiiinooooouuuuyy'['àáâãäçèéêëìíîïñòóôõöùúûüýÿ'.index(m.group())], 
+                     text)
+        # Remplacer tout ce qui n'est pas alphanumérique par des tirets
+        text = re.sub(r'[^a-z0-9]+', '-', text)
+        # Supprimer les tirets en début et fin
+        text = text.strip('-')
+        # Réduire les tirets multiples
+        text = re.sub(r'-+', '-', text)
+        return text
 
     def save_to_file(self, content, filename=None):
         """Sauvegarde le contenu dans un fichier."""
@@ -401,8 +438,29 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
         os.makedirs(output_dir, exist_ok=True)
         
         if not filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"fiche_produit_{timestamp}.mdx"
+            try:
+                # Extraire la marque et le modèle du contenu markdown
+                brand_match = re.search(r"brand: '([^']+)'", content)
+                model_match = re.search(r"model: '([^']+)'", content)
+                
+                if brand_match and model_match:
+                    brand = brand_match.group(1)
+                    model = model_match.group(1)
+                    
+                    # Slugifier la marque et le modèle
+                    brand_slug = self._slugify(brand)
+                    model_slug = self._slugify(model)[:40]  # Limiter la longueur du modèle si nécessaire
+                    
+                    # Créer le nom de fichier
+                    filename = f"fiche-{brand_slug}-{model_slug}.mdx"
+                else:
+                    # Fallback si on ne trouve pas la marque ou le modèle
+                    timestamp = datetime.now().strftime("%Y%m%d")
+                    filename = f"fiche-{timestamp}.mdx"
+            except Exception as e:
+                print(f"⚠️ Impossible d'extraire la marque ou le modèle: {e}")
+                timestamp = datetime.now().strftime("%Y%m%d")
+                filename = f"fiche-{timestamp}.mdx"
         
         # Construire le chemin complet
         filepath = os.path.join(output_dir, os.path.basename(filename))

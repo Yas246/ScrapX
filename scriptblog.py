@@ -130,8 +130,42 @@ class BlogScraper:
             print(f"Erreur lors de l'extraction des liens: {e}")
             return []
     
-    def scrape_article_content(self, url: str) -> Optional[str]:
+    def _extract_main_image(self, soup) -> Optional[str]:
+        """Extrait l'URL de l'image principale de l'article."""
+        # Sélecteurs communs pour les images principales d'articles
+        image_selectors = [
+            'meta[property="og:image"]',  # Open Graph image
+            'meta[name="twitter:image"]',  # Twitter Card image
+            '.article-featured-image img',  # Classes communes pour les images à la une
+            '.post-thumbnail img',
+            '.entry-featured-image img',
+            'article img:first-of-type',  # Première image dans l'article
+            '.wp-post-image',  # Image à la une WordPress
+            'article .image-principale',
+            '[itemprop="image"]'
+        ]
         
+        # Chercher l'image avec les sélecteurs
+        for selector in image_selectors:
+            element = soup.select_one(selector)
+            if element:
+                # Selon le type d'élément, extraire l'URL
+                if element.name == 'meta':
+                    image_url = element.get('content')
+                else:
+                    image_url = element.get('src')
+                
+                if image_url:
+                    # S'assurer que l'URL est absolue
+                    if not image_url.startswith(('http://', 'https://')):
+                        base_url = soup.find('base', href=True)
+                        if base_url:
+                            image_url = urljoin(base_url['href'], image_url)
+                    return image_url
+        
+        return None
+
+    def scrape_article_content(self, url: str) -> Optional[dict]:
         try:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
@@ -165,15 +199,35 @@ class BlogScraper:
                 if body:
                     content = body.get_text(strip=True)
             
-            return content if len(content) > 100 else None
+            # Extraire l'image principale
+            image_url = self._extract_main_image(soup)
+            
+            return {
+                'content': content if len(content) > 100 else None,
+                'image_url': image_url
+            }
             
         except Exception as e:
             print(f"Erreur lors du scraping de {url}: {e}")
             return None
     
-    def generate_blog_article(self, content: str, original_url: str) -> Optional[str]:
-        
+    def _clean_markdown_response(self, text: str) -> str:
+        """Nettoie la réponse de l'API en retirant les balises ```markdown``` et ```."""
+        # Retire les balises ```markdown au début
+        text = re.sub(r'^```markdown\s*\n', '', text, flags=re.MULTILINE)
+        # Retire les balises ``` à la fin
+        text = re.sub(r'\n```\s*$', '', text, flags=re.MULTILINE)
+        # Retire toute autre balise ```markdown qui pourrait être présente
+        text = re.sub(r'```markdown\s*', '', text)
+        # Retire les balises ``` restantes
+        text = re.sub(r'```\s*', '', text)
+        return text.strip()
+
+    def generate_blog_article(self, content: str, original_url: str, image_url: Optional[str] = None) -> Optional[str]:
         try:
+            # Image par défaut si aucune image n'est trouvée
+            default_image = "https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
+            
             prompt = f"""
 Transforme ce contenu en un article de blog professionnel au format Markdown suivant EXACTEMENT cette structure:
 
@@ -181,7 +235,7 @@ Transforme ce contenu en un article de blog professionnel au format Markdown sui
 publishDate: {datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')}
 title: '[TITRE_ACCROCHEUR]'
 excerpt: [DESCRIPTION_COURTE_ET_ENGAGEANTE]
-image: https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80
+image: '{image_url if image_url else default_image}'
 tags:
   - [tag1]
   - [tag2]
@@ -203,25 +257,83 @@ INSTRUCTIONS:
    - Une conclusion
    - Format Markdown (gras, italique, listes, etc.)
 5. L'article doit faire au minimum 800 mots
-6. Utilise l'image Unsplash fournie (ne pas changer)
+6. Utilise l'image fournie (ne pas changer)
 7. Garde le format EXACT des métadonnées
+8. NE PAS utiliser de balises ```markdown``` ou ``` dans la réponse
 
 Contenu à transformer:
 {content[:3000]}
 """
 
             response = self.model.generate_content(prompt)
-            return response.text
+            if not response or not response.text:
+                return None
+                
+            # Nettoyer la réponse
+            cleaned_content = self._clean_markdown_response(response.text)
+            return cleaned_content
             
         except Exception as e:
             print(f"Erreur avec l'API Gemini: {e}")
             return None
     
-    def save_article(self, article_content: str, filename: str, output_dir: str = "articles"):
-        
+    def _extract_site_name(self, url: str) -> str:
+        """Extrait et nettoie le nom du site depuis l'URL."""
+        try:
+            # Extraire le domaine sans www. et sans extension
+            domain = urlparse(url).netloc.lower()
+            domain = re.sub(r'^www\.', '', domain)
+            domain = domain.split('.')[0]
+            return domain
+        except Exception:
+            return "site"
+
+    def _extract_tags(self, content: str) -> str:
+        """Extrait les tags du contenu markdown."""
+        try:
+            # Chercher les tags dans le contenu
+            tags_match = re.findall(r'tags:\s*\n(?:\s*-\s*\[([^\]]+)\])*', content)
+            if tags_match:
+                # Prendre le premier tag trouvé
+                return tags_match[0].lower()
+            return "article"
+        except Exception:
+            return "article"
+
+    def _slugify(self, text: str) -> str:
+        """Convertit un texte en slug."""
+        # Convertir en minuscules
+        text = text.lower()
+        # Remplacer les caractères accentués
+        text = re.sub(r'[àáâãäçèéêëìíîïñòóôõöùúûüýÿ]', 
+                     lambda m: 'aaaaaceeeeiiiinooooouuuuyy'['àáâãäçèéêëìíîïñòóôõöùúûüýÿ'.index(m.group())], 
+                     text)
+        # Remplacer tout ce qui n'est pas alphanumérique par des tirets
+        text = re.sub(r'[^a-z0-9]+', '-', text)
+        # Supprimer les tirets en début et fin
+        text = text.strip('-')
+        # Réduire les tirets multiples
+        text = re.sub(r'-+', '-', text)
+        return text
+
+    def save_article(self, article_content: str, url: str, output_dir: str = "articles"):
+        """Sauvegarde l'article avec un nom basé sur le titre slugifié."""
         try:
             os.makedirs(output_dir, exist_ok=True)
-            filepath = os.path.join(output_dir, f"{filename}.md")
+            
+            # Extraire le titre du contenu markdown
+            title_match = re.search(r"title: '([^']+)'", article_content)
+            if title_match:
+                title = title_match.group(1)
+                # Slugifier le titre
+                filename = f"{self._slugify(title)}.md"
+            else:
+                # Fallback si on ne trouve pas le titre
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                filename = f"article-{timestamp}.md"
+            
+            # Construire le chemin complet
+            filepath = os.path.join(output_dir, filename)
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(article_content)
@@ -242,16 +354,16 @@ Contenu à transformer:
             print(f"❌ Impossible de récupérer le contenu de l'article {article_number}")
             return None
         
-        print(f"✅ Contenu récupéré ({len(content)} caractères)")
+        print(f"✅ Contenu récupéré ({len(content['content'])} caractères)")
         
-        article = self.generate_blog_article(content, article_url)
+        article = self.generate_blog_article(content['content'], article_url, content['image_url'])
         if not article:
             print(f"❌ Impossible de générer l'article {article_number}")
             return None
         
         # Nom de fichier unique avec numéro d'article et timestamp
         filename = f"article_{article_number}_{int(time.time())}"
-        filepath = self.save_article(article, filename)
+        filepath = self.save_article(article, article_url)
         
         if filepath:
             print(f"✅ Article {article_number} sauvegardé: {filepath}")
@@ -319,15 +431,15 @@ Contenu à transformer:
                 print("❌ Impossible de récupérer le contenu")
                 continue
             
-            print(f"✅ Contenu récupéré ({len(content)} caractères)")
+            print(f"✅ Contenu récupéré ({len(content['content'])} caractères)")
             
-            article = self.generate_blog_article(content, link)
+            article = self.generate_blog_article(content['content'], link, content['image_url'])
             if not article:
                 print("❌ Impossible de générer l'article")
                 continue
             
             filename = f"article_{i+1}_{int(time.time())}"
-            filepath = self.save_article(article, filename)
+            filepath = self.save_article(article, link)
             if filepath:
                 processed_files.append(filepath)
                 print(f"✅ Article sauvegardé")
