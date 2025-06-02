@@ -43,7 +43,7 @@ ScrapX est une suite d'outils Python qui permet de générer automatiquement du 
 1. Clonez le dépôt :
 
 ```bash
-git clone https://github.com/votre-username/ScrapX.git
+git clone https://github.com/Yas246/ScrapX
 cd ScrapX
 ```
 
