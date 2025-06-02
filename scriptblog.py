@@ -285,7 +285,6 @@ Contenu à transformer:
             else:
                 print(f"❌ Échec du traitement de l'article {i}")
             
-            # Pause entre les articles pour éviter de surcharger les serveurs
             if i < total_urls:
                 print("⏳ Pause de 3 secondes...")
                 time.sleep(3)
@@ -333,16 +332,13 @@ Contenu à transformer:
                 processed_files.append(filepath)
                 print(f"✅ Article sauvegardé")
             
-            # Pause pour éviter de surcharger les serveurs
             time.sleep(2)
         
         print(f"\n🎉 Traitement terminé. {len(processed_files)} articles générés.")
         return processed_files
 
 def load_config():
-    """
-    Charge la configuration et les URLs depuis les fichiers
-    """
+    
     load_dotenv()
     
     gemini_api_key = os.getenv('GEMINI_API_KEY')
@@ -355,11 +351,10 @@ def load_config():
         with open('urlblog.txt', 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
-        # Nettoyer les URLs (enlever espaces et lignes vides)
         urls = []
         for line in lines:
             url = line.strip()
-            if url and not url.startswith('#'):  # Ignorer les lignes vides et commentaires
+            if url and not url.startswith('#'):  
                 urls.append(url)
         
         if not urls:
@@ -398,19 +393,16 @@ def main():
         print(f"\n🔧 Initialisation du scraper...")
         scraper = BlogScraper(gemini_api_key)
         
-        # Déterminer le mode de traitement
         single_articles = [url for url in urls if scraper.is_single_article_url(url)]
         blog_pages = [url for url in urls if not scraper.is_single_article_url(url)]
         
         processed_files = []
         
-        # Traiter les articles uniques
         if single_articles:
             print(f"\n📄 Mode: Articles uniques ({len(single_articles)} URLs)")
             files = scraper.process_multiple_urls(single_articles)
             processed_files.extend(files)
         
-        # Traiter les pages de blog
         if blog_pages:
             print(f"\n🏠 Mode: Pages de blog ({len(blog_pages)} URLs)")
             try:
@@ -423,7 +415,6 @@ def main():
                 files = scraper.process_blog(blog_url, max_articles)
                 processed_files.extend(files)
         
-        # Résumé final
         if processed_files:
             print(f"\n🎉 Succès! {len(processed_files)} article(s) généré(s):")
             for file in processed_files:
