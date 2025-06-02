@@ -1,0 +1,18 @@
+# Fichier des URLs de blog à analyser
+# Format : une URL par ligne
+# Les lignes commençant par # sont des commentaires et seront ignorées
+# Les lignes vides sont également ignorées
+
+# --- Mode Site (URL racine) ---
+#https://monblog.com
+
+# --- Mode Articles Spécifiques ---
+#https://monblog.com/tech/meilleurs-smartphones-2024
+#https://monblog.com/tech/comparatif-laptops
+
+
+# --- Notes importantes ---
+# - Assurez-vous que les URLs sont complètes (avec https:// ou http://)
+# - Une seule URL par ligne
+# - Pas d'espaces avant ou après l'URL
+# - Les URLs invalides seront automatiquement ignorées

@@ -1,0 +1,6 @@
+# Fichier des URLs d'articles à analyser
+# Une URL par ligne, les lignes commençant par # sont ignorées
+
+# Vous pouvez ajouter vos URLs ici :
+# https://votre-site.com/article-1
+# https://autre-site.com/review-2
