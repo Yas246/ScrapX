@@ -452,7 +452,7 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
                     model_slug = self._slugify(model)[:40]  # Limiter la longueur du modèle si nécessaire
                     
                     # Créer le nom de fichier
-                    filename = f"fiche-{brand_slug}-{model_slug}.mdx"
+                    filename = f"{brand_slug}-{model_slug}.mdx"
                 else:
                     # Fallback si on ne trouve pas la marque ou le modèle
                     timestamp = datetime.now().strftime("%Y%m%d")
