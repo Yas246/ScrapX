@@ -132,6 +132,9 @@ class ProductScraper:
 
     def _extract_product_image(self, soup):
         """Extrait l'URL de l'image principale du produit."""
+        # Image par défaut si aucune image n'est trouvée
+        default_image = "https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
+        
         # Sélecteurs spécifiques aux images de produits
         image_selectors = [
             # Sélecteurs Open Graph et Twitter
@@ -173,7 +176,8 @@ class ProductScraper:
                             image_url = urljoin(base_url['href'], image_url)
                     return image_url
         
-        return None
+        # Si aucune image n'est trouvée, retourner l'image par défaut
+        return default_image
 
     def generate_product_sheet(self, article_data):
         """Génère une fiche produit à partir d'UN SEUL article"""
@@ -383,7 +387,7 @@ INSTRUCTIONS IMPORTANTES:
         # Si c'est une URL, elle sera juste imprimée. Si le MDX doit la traiter comme une image, il faudrait un ![]().
         # La demande est de mettre `product_data.get("image", "")` donc on le fait.
         hook_intro_escaped_for_body = ProductScraper._escape_yaml_string(product_data.get("hookIntro", ""))
-        markdown_template += f"Si vous cherchez à améliorer votre expérience de jeu sans vous ruiner, le **{product_data.get('image', '')}** mérite toute votre attention. Comme mentionné dans notre introduction : **{hook_intro_escaped_for_body}**\n\n"
+        markdown_template += f"Si vous cherchez à améliorer votre expérience de jeu sans vous ruiner, le **{product_data.get('brand', '')} {product_data.get('model', '')}** mérite toute votre attention. Comme mentionné dans notre introduction : **{hook_intro_escaped_for_body}**\n\n"
         
         markdown_template += "### Atouts Majeurs pour une Expérience Inégalée\n\n"
         # keyBenefits rendering (inchangé, utilise le JSX fourni précédemment)
@@ -473,7 +477,7 @@ INSTRUCTIONS IMPORTANTES:
             # Pause entre les URLs pour éviter de surcharger les serveurs
             if i < len(urls):
                 print("⏳ Pause de 2 secondes avant l'URL suivante...")
-                time.sleep(2)
+                time.sleep(5)
         
         return results
 

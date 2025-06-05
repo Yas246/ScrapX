@@ -132,6 +132,9 @@ class BlogScraper:
     
     def _extract_main_image(self, soup) -> Optional[str]:
         """Extrait l'URL de l'image principale de l'article."""
+        # Image par défaut si aucune image n'est trouvée
+        default_image = "https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
+        
         # Sélecteurs communs pour les images principales d'articles
         image_selectors = [
             'meta[property="og:image"]',  # Open Graph image
@@ -163,7 +166,8 @@ class BlogScraper:
                             image_url = urljoin(base_url['href'], image_url)
                     return image_url
         
-        return None
+        # Si aucune image n'est trouvée, retourner l'image par défaut
+        return default_image
 
     def scrape_article_content(self, url: str) -> Optional[dict]:
         try:
@@ -225,6 +229,26 @@ class BlogScraper:
         if not lines:
             return "---\n---" # Return minimal valid MDX for empty input
 
+        # 4. Ensure dates are in YYYY-MM-DD format
+        date_pattern = r'publishDate:\s*([^\n]+)'
+        date_match = re.search(date_pattern, text)
+        if date_match:
+            current_date = date_match.group(1).strip()
+            try:
+                # Try to parse the date in various formats
+                for fmt in ['%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                    try:
+                        parsed_date = datetime.strptime(current_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+                # Format the date as YYYY-MM-DD
+                formatted_date = parsed_date.strftime('%Y-%m-%d')
+                text = re.sub(date_pattern, f'publishDate: {formatted_date}', text)
+            except:
+                # If date parsing fails, use current date
+                text = re.sub(date_pattern, f'publishDate: {datetime.now().strftime("%Y-%m-%d")}', text)
+
         first_line_stripped_lower = lines[0].strip().lower()
         
         # Check if the first line is one of the unwanted standalone prefixes
@@ -244,10 +268,10 @@ class BlogScraper:
                 # Only the prefix was present
                 return "---\n---" # Return minimal valid MDX
 
-        # 4. Strip leading/trailing whitespace again in case prefix removal left some
+        # 5. Strip leading/trailing whitespace again in case prefix removal left some
         text = text.strip()
 
-        # 5. Ensure the text starts with "---". If not, prepend it.
+        # 6. Ensure the text starts with "---". If not, prepend it.
         if not text.startswith("---"):
             # If text is now empty (e.g., it was only "yaml" and got stripped),
             # ensure we don't just prepend "---" to an empty string without a newline.
@@ -272,7 +296,7 @@ Transforme le contenu fourni en un article de blog professionnel, unique et enga
 Respecte SCRUPULEUSEMENT la structure YAML frontmatter et les instructions de formatage ci-dessous.
 
 ---
-publishDate: {datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')}
+publishDate: {datetime.now().strftime('%Y-%m-%d')}
 title: 'Titre de l''article généré par l''IA'
 excerpt: "Extrait de l''article généré par l''IA (1-2 phrases)"
 image: '{image_url if image_url else default_image}'
@@ -292,7 +316,7 @@ draft: false
 INSTRUCTIONS SPÉCIFIQUES:
 
 1.  **Frontmatter (YAML) - Respecte cet ordre et ce format EXACTEMENT:**
-    *   `publishDate`: Doit être la date et l'heure actuelles au format ISO 8601 complet (`YYYY-MM-DDTHH:MM:SSZ`).
+    *   `publishDate`: Doit être au format `YYYY-MM-DD` (ex: 2024-01-02).
     *   `title`: Génère un titre d'article unique, optimisé SEO et engageant. Il doit être une chaîne de caractères entre apostrophes simples (ex: 'Mon Super Titre'). Si le titre contient une apostrophe, doublez-la (ex: 'L''aventure d''un chat').
     *   `excerpt`: Génère un extrait court (1-2 phrases), percutant et cohérent avec l'introduction. Mêmes règles de formatage que pour `title`.
     *   `image`: Utilise l'URL d'image fournie (`{image_url if image_url else default_image}`). Doit être une chaîne entre apostrophes simples.
@@ -499,7 +523,7 @@ Contenu à transformer:
                 processed_files.append(filepath)
                 print(f"✅ Article sauvegardé")
             
-            time.sleep(2)
+            time.sleep(5)
         
         print(f"\n🎉 Traitement terminé. {len(processed_files)} articles générés.")
         return processed_files
