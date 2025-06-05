@@ -291,13 +291,34 @@ class BlogScraper:
             # Image par défaut si aucune image n'est trouvée
             default_image = "https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
             
+            # Générer d'abord un titre temporaire pour pouvoir créer l'URL canonique
+            temp_prompt = f"""
+Génère uniquement un titre SEO optimisé pour cet article. Format attendu:
+'Titre entre apostrophes simples'
+
+Contenu à titrer:
+{content[:1000]}
+"""
+            temp_response = self.model.generate_content(temp_prompt)
+            if not temp_response or not temp_response.text:
+                return None
+            
+            # Extraire le titre et le slugifier
+            title_match = re.search(r"'([^']+)'", temp_response.text)
+            if not title_match:
+                return None
+            
+            title = title_match.group(1)
+            slug = self._slugify(title)
+            canonical_url = f"https://www.jeupix.com/blog/{slug}"
+            
             prompt = f"""
 Transforme le contenu fourni en un article de blog professionnel, unique et engageant, au format MDX.
 Respecte SCRUPULEUSEMENT la structure YAML frontmatter et les instructions de formatage ci-dessous.
 
 ---
 publishDate: {datetime.now().strftime('%Y-%m-%d')}
-title: 'Titre de l''article généré par l''IA'
+title: '{title}'
 excerpt: "Extrait de l''article généré par l''IA (1-2 phrases)"
 image: '{image_url if image_url else default_image}'
 tags:
@@ -305,7 +326,7 @@ tags:
   - tag2
   - tag3
 metadata:
-  canonical: {original_url}
+  canonical: '{canonical_url}'
 draft: false
 ---
 
@@ -317,11 +338,11 @@ INSTRUCTIONS SPÉCIFIQUES:
 
 1.  **Frontmatter (YAML) - Respecte cet ordre et ce format EXACTEMENT:**
     *   `publishDate`: Doit être au format `YYYY-MM-DD` (ex: 2024-01-02).
-    *   `title`: Génère un titre d'article unique, optimisé SEO et engageant. Il doit être une chaîne de caractères entre apostrophes simples (ex: 'Mon Super Titre'). Si le titre contient une apostrophe, doublez-la (ex: 'L''aventure d''un chat').
+    *   `title`: Utilise le titre généré précédemment.
     *   `excerpt`: Génère un extrait court (1-2 phrases), percutant et cohérent avec l'introduction. Mêmes règles de formatage que pour `title`.
     *   `image`: Utilise l'URL d'image fournie (`{image_url if image_url else default_image}`). Doit être une chaîne entre apostrophes simples.
     *   `tags`: Fournis une liste de 3 tags pertinents (en français ou anglais). Chaque tag doit être une chaîne simple (pas besoin d'apostrophes autour de chaque tag individuel dans la liste YAML, mais la liste elle-même est sous `tags:`).
-    *   `metadata.canonical`: Utilise l'URL originale de l'article source (`{original_url}`). Doit être une chaîne (apostrophes simples si elle contient des caractères spéciaux YAML).
+    *   `metadata.canonical`: Utilise l'URL canonique générée (`{canonical_url}`). Doit être une chaîne (apostrophes simples si elle contient des caractères spéciaux YAML).
     *   `draft`: Toujours `false`.
 
 2.  **Contenu de l'Article (MDX Body):**
