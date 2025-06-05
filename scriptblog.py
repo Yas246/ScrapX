@@ -212,16 +212,55 @@ class BlogScraper:
             return None
     
     def _clean_markdown_response(self, text: str) -> str:
-        """Nettoie la réponse de l'API en retirant les balises ```markdown``` et ```."""
-        # Retire les balises ```markdown au début
-        text = re.sub(r'^```markdown\s*\n', '', text, flags=re.MULTILINE)
-        # Retire les balises ``` à la fin
+        # 1. Initial global fence removal (case-insensitive for keywords)
+        text = re.sub(r'^```(?:markdown|yaml)?\s*\n', '', text, flags=re.IGNORECASE | re.MULTILINE)
         text = re.sub(r'\n```\s*$', '', text, flags=re.MULTILINE)
-        # Retire toute autre balise ```markdown qui pourrait être présente
-        text = re.sub(r'```markdown\s*', '', text)
-        # Retire les balises ``` restantes
-        text = re.sub(r'```\s*', '', text)
-        return text.strip()
+
+        # 2. Strip leading/trailing whitespace from the whole string
+        text = text.strip()
+
+        # 3. Handle specific "yaml" or "```yaml" prefixes on the first line
+        lines = text.splitlines()
+        
+        if not lines:
+            return "---\n---" # Return minimal valid MDX for empty input
+
+        first_line_stripped_lower = lines[0].strip().lower()
+        
+        # Check if the first line is one of the unwanted standalone prefixes
+        is_prefix_to_remove = False
+        if first_line_stripped_lower == "yaml":
+            is_prefix_to_remove = True
+        elif first_line_stripped_lower.startswith("```yaml") or first_line_stripped_lower.startswith("``` yaml"):
+            # Check if it's just the fence keyword and not content starting with ```yaml
+            temp_check = first_line_stripped_lower.replace("```yaml", "").replace("``` yaml", "").replace("`", "").strip()
+            if not temp_check:
+                is_prefix_to_remove = True
+                
+        if is_prefix_to_remove:
+            if len(lines) > 1:
+                text = "\n".join(lines[1:]) # Remove the prefix line
+            else:
+                # Only the prefix was present
+                return "---\n---" # Return minimal valid MDX
+
+        # 4. Strip leading/trailing whitespace again in case prefix removal left some
+        text = text.strip()
+
+        # 5. Ensure the text starts with "---". If not, prepend it.
+        if not text.startswith("---"):
+            # If text is now empty (e.g., it was only "yaml" and got stripped),
+            # ensure we don't just prepend "---" to an empty string without a newline.
+            if not text:
+                return "---\n---" # Minimal valid MDX for originally empty or prefix-only content
+            text = "---\n" + text
+        
+        # If the text was just "---" (e.g. from prepending to empty), ensure a closing "---".
+        # Or if the original text was just "---"
+        if text.strip() == "---":
+            text = "---\n---"
+
+        return text
 
     def generate_blog_article(self, content: str, original_url: str, image_url: Optional[str] = None) -> Optional[str]:
         try:
@@ -229,41 +268,57 @@ class BlogScraper:
             default_image = "https://images.unsplash.com/photo-1611224923853-80b023f02d71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2070&q=80"
             
             prompt = f"""
-Transforme ce contenu en un article de blog professionnel au format Markdown suivant EXACTEMENT cette structure:
+Transforme le contenu fourni en un article de blog professionnel, unique et engageant, au format MDX.
+Respecte SCRUPULEUSEMENT la structure YAML frontmatter et les instructions de formatage ci-dessous.
 
 ---
 publishDate: {datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')}
-title: '[TITRE_ACCROCHEUR]'
-excerpt: [DESCRIPTION_COURTE_ET_ENGAGEANTE]
+title: 'Titre de l''article généré par l''IA'
+excerpt: "Extrait de l''article généré par l''IA (1-2 phrases)"
 image: '{image_url if image_url else default_image}'
 tags:
-  - [tag1]
-  - [tag2]
-  - [tag3]
+  - tag1
+  - tag2
+  - tag3
 metadata:
   canonical: {original_url}
+draft: false
 ---
 
-[CONTENU_ARTICLE_COMPLET_EN_MARKDOWN]
+# Titre Principal de l'Article (H1)
 
-INSTRUCTIONS:
-1. Crée un titre accrocheur et professionnel en français
-2. Écris un excerpt de 1-2 phrases qui donne envie de lire
-3. Choisis 3 tags pertinents en anglais (ex: web-development, marketing, tutorial)
-4. Réécris complètement l'article en français avec:
-   - Une introduction engageante
-   - Des sections avec des titres ## 
-   - Du contenu informatif et utile
-   - Une conclusion
-   - Format Markdown (gras, italique, listes, etc.)
-5. L'article doit faire au minimum 800 mots
-6. Utilise l'image fournie (ne pas changer)
-7. Garde le format EXACT des métadonnées
-8. NE PAS utiliser de balises ```markdown``` ou ``` dans la réponse
+[CORPS DE L'ARTICLE EN MARKDOWN BIEN STRUCTURÉ ET NARRATIF ICI]
+
+INSTRUCTIONS SPÉCIFIQUES:
+
+1.  **Frontmatter (YAML) - Respecte cet ordre et ce format EXACTEMENT:**
+    *   `publishDate`: Doit être la date et l'heure actuelles au format ISO 8601 complet (`YYYY-MM-DDTHH:MM:SSZ`).
+    *   `title`: Génère un titre d'article unique, optimisé SEO et engageant. Il doit être une chaîne de caractères entre apostrophes simples (ex: 'Mon Super Titre'). Si le titre contient une apostrophe, doublez-la (ex: 'L''aventure d''un chat').
+    *   `excerpt`: Génère un extrait court (1-2 phrases), percutant et cohérent avec l'introduction. Mêmes règles de formatage que pour `title`.
+    *   `image`: Utilise l'URL d'image fournie (`{image_url if image_url else default_image}`). Doit être une chaîne entre apostrophes simples.
+    *   `tags`: Fournis une liste de 3 tags pertinents (en français ou anglais). Chaque tag doit être une chaîne simple (pas besoin d'apostrophes autour de chaque tag individuel dans la liste YAML, mais la liste elle-même est sous `tags:`).
+    *   `metadata.canonical`: Utilise l'URL originale de l'article source (`{original_url}`). Doit être une chaîne (apostrophes simples si elle contient des caractères spéciaux YAML).
+    *   `draft`: Toujours `false`.
+
+2.  **Contenu de l'Article (MDX Body):**
+    *   **Réécriture Complète:** REFORMULE et RÉÉCRIS intégralement le contenu source pour créer un NOUVEL article de blog. Ne te contente pas de résumer ou de modifier légèrement.
+    *   **Titre H1:** Commence le corps de l'article par un titre principal (H1, formaté avec `#`). Ce titre H1 peut être différent du `title` du frontmatter.
+    *   **Style Narratif et Structuré:** Rédige le corps de l'article en Markdown simple et narratif. Utilise des titres et sous-titres (`##`, `###`) pour structurer le contenu, des paragraphes bien formés, des listes à puces (`- item`) ou numérotées (`1. item`) si approprié, du texte en gras (`**gras**`) ou italique (`*italique*`) pour mettre en évidence des points clés, et des citations (`> texte cité`) si pertinent. Le contenu doit être fluide, lisible et engageant.
+    *   **Longueur:** L'article doit faire au minimum 800 mots.
+    *   **Syntaxe MDX Valide:** Assure-toi que tout le contenu généré est compatible MDX. Échappe correctement les caractères spéciaux comme `{'{'}`, `{'}'}`, `<` et `>` s'ils doivent apparaître littéralement dans le texte et ne font pas partie d'une syntaxe MDX/HTML valide.
+
+3.  **Qualité & Style Linguistique:**
+    *   Rédige en français soutenu, professionnel et engageant.
+    *   L'article doit être unique, informatif et apporter une réelle valeur ajoutée au lecteur.
+
+4.  **Format de Sortie:**
+    *   Réponds UNIQUEMENT avec le frontmatter YAML suivi du contenu MDX.
+    *   NE PAS inclure de balises ```markdown ou ``` au début ou à la fin de ta réponse.
+    *   Ta réponse doit être uniquement le document MDX complet, en commençant par `---` pour le frontmatter et se terminant après le contenu principal de l'article. N'inclus aucun commentaire, note, explication ou texte superflu en dehors du contenu de l'article lui-même.
 
 Contenu à transformer:
-{content[:3000]}
-"""
+{content[:4000]} 
+""" # Limité à 4000 caractères pour le contexte du prompt
 
             response = self.model.generate_content(prompt)
             if not response or not response.text:
@@ -326,11 +381,11 @@ Contenu à transformer:
             if title_match:
                 title = title_match.group(1)
                 # Slugifier le titre
-                filename = f"{self._slugify(title)}.md"
+                filename = f"{self._slugify(title)}.mdx" # Changement d'extension
             else:
                 # Fallback si on ne trouve pas le titre
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                filename = f"article-{timestamp}.md"
+                filename = f"article-{timestamp}.mdx" # Changement d'extension
             
             # Construire le chemin complet
             filepath = os.path.join(output_dir, filename)

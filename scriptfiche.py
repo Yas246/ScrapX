@@ -13,6 +13,13 @@ import os
 from dotenv import load_dotenv
 
 class ProductScraper:
+
+    @staticmethod
+    def _escape_yaml_string(text_input):
+        if not isinstance(text_input, str):
+            return text_input # Return non-strings as is
+        return text_input.replace("'", "''")
+
     def __init__(self):
         
         load_dotenv()
@@ -181,7 +188,12 @@ class ProductScraper:
                 raise Exception("Réponse vide de l'API Gemini")
             
             product_data = self._parse_gemini_response(response.text)
-            markdown_content = self._generate_markdown(product_data)
+            
+            if product_data:
+                # Ajouter l'URL de l'article original à product_data pour le canonical link
+                product_data['original_article_url'] = article_data.get('url', '')
+            
+            markdown_content = self._generate_markdown(product_data) # product_data peut être None
             
             return markdown_content
             
@@ -193,41 +205,34 @@ class ProductScraper:
         """Crée le prompt pour UN SEUL article"""
         
         prompt = f"""
-Tu es un expert en rédaction de fiches produits techniques. À partir de l'article suivant, tu dois extraire les informations d'un produit et créer une fiche produit EXACTEMENT dans ce format JSON (respecte scrupuleusement la structure) :
+Tu es un expert en rédaction de fiches produits techniques. À partir de l'article suivant, tu dois extraire les informations d'un produit et créer une fiche produit EXACTEMENT dans ce format JSON (respecte scrupuleusement la structure et l'ordre des champs) :
 
 {{
-    "name": "Nom complet du produit avec toutes ses caractéristiques",
+    "name": "Nom complet du produit",
     "brand": "Marque du produit",
     "model": "Modèle exact du produit",
     "image": "{article_data.get('image_url', '')}",
     "amazonASIN": "ASIN_PLACEHOLDER",
-    "publishDate": "{datetime.now().strftime('%Y-%m-%d')}",
-    "updateDate": "{datetime.now().strftime('%Y-%m-%d')}",
+    "publishDate": "YYYY-MM-DD",
+    "updateDate": "YYYY-MM-DD",
     "draft": false,
-    "title": "Titre accrocheur pour le test/avis du produit",
-    "hookIntro": "Introduction accrocheuse décrivant les points forts du produit",
+    "title": "Titre accrocheur pour le test/avis",
+    "hookIntro": "Introduction accrocheuse",
     "keyBenefits": [
-        "Bénéfice 1 : Description détaillée du premier avantage",
-        "Bénéfice 2 : Description détaillée du deuxième avantage",
-        "Bénéfice 3 : Description détaillée du troisième avantage",
-        "Bénéfice 4 : Description détaillée du quatrième avantage",
-        "Bénéfice 5 : Description détaillée du cinquième avantage"
+        "Bénéfice 1 : Description",
+        "Bénéfice 2 : Description"
     ],
     "keyFeatures": [
-        "Caractéristique technique 1",
-        "Caractéristique technique 2", 
-        "Caractéristique technique 3",
-        "Caractéristique technique 4",
-        "Caractéristique technique 5",
-        "Caractéristique technique 6",
-        "Caractéristique technique 7",
-        "Caractéristique technique 8"
+        "Caractéristique 1",
+        "Caractéristique 2"
     ],
-    "detailedSpecs": "Description détaillée et technique du produit mettant en avant ses spécifications et performances",
-    "ctaText": "Voir les Offres pour le [Nom du Produit]",
+    "detailedSpecs": "Description technique détaillée",
+    "socialProof": "Exemple de preuve sociale (ex: Très populaire auprès des joueurs)",
+    "warrantyInfo": "Information sur la garantie (ex: couvert par une garantie constructeur de 2 ans)",
+    "ctaText": "Texte pour le bouton d'appel à l'action",
     "affiliateLink": "https://www.amazon.fr/dp/ASIN_PLACEHOLDER?tag=votretag-21",
-    "category": "Catégorie appropriée du produit",
-    "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"]
+    "category": "CHOISIR_UNE_CATEGORIE_PARMI_LA_LISTE_AUTORISEE",
+    "tags": ["tag1", "tag2", "tag3"]
 }}
 
 ARTICLE À ANALYSER:
@@ -236,13 +241,23 @@ Titre: {article_data['title']}
 Contenu: {article_data['content'][:4000]}...
 
 INSTRUCTIONS IMPORTANTES:
-1. Extrait UNIQUEMENT les informations du produit principal mentionné dans cet article
-2. Assure-toi que le nom du produit soit complet et détaillé
-3. Les keyBenefits doivent suivre le format "Titre : Description"
-4. Les keyFeatures doivent être des caractéristiques techniques précises
-5. La catégorie doit être pertinente (ex: "Moniteurs Gaming", "Smartphones", "Casques Audio", etc.)
-6. Les tags doivent inclure la marque, le modèle et des mots-clés pertinents
-7. Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire
+1.  Extrait UNIQUEMENT les informations du produit principal mentionné dans cet article.
+2.  `name`: Nom complet et détaillé du produit.
+3.  `amazonASIN`: Si un ASIN Amazon est clairement identifiable dans l'article pour le produit principal, utilise-le. Sinon, conserve "ASIN_PLACEHOLDER".
+4.  `publishDate` et `updateDate`: Doivent être au format `YYYY-MM-DD`. Tu peux utiliser la date actuelle si non spécifiée.
+5.  `draft`: Toujours `false`.
+6.  `title`: Titre engageant et SEO-friendly pour la fiche produit, différent du nom du produit.
+7.  `hookIntro`: Introduction concise (1-2 phrases) qui capte l'attention.
+8.  `keyBenefits`: Liste d'au moins 2 bénéfices clés au format "Titre du Bénéfice : Description".
+9.  `keyFeatures`: Liste d'au moins 2 caractéristiques techniques importantes.
+10. `detailedSpecs`: Description technique détaillée.
+11. `socialProof`: Fournis un exemple de preuve sociale (ex: "Très populaire auprès des joueurs", "Recommandé par les experts", "Noté 4.5/5 étoiles par plus de 1000 utilisateurs"). Si non disponible, indique "Non spécifié".
+12. `warrantyInfo`: Fournis des informations sur la garantie (ex: "Couvert par une garantie constructeur de 2 ans", "Garantie limitée de 1 an"). Si non disponible, indique "Non spécifié".
+13. `ctaText`: Texte pour le bouton d'appel à l'action (ex: "Voir le Prix sur Amazon", "Comparer les Offres").
+14. `category`: DOIT être l'une des suivantes : "Moniteur", "Console", "PC", "Manette", "Jeux Vidéo". Ne pas inventer d'autres catégories.
+15. `tags`: Liste d'au moins 3 tags pertinents incluant marque, modèle et mots-clés.
+16. Ta réponse ne doit contenir QUE l'objet JSON. N'ajoute aucun commentaire, explication, ou texte conversationnel avant ou après l'objet JSON.
+17. Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.
 """
         
         return prompt
@@ -273,84 +288,130 @@ INSTRUCTIONS IMPORTANTES:
     def _generate_markdown(self, product_data):
         if not product_data:
             return None
-        
-        # Template markdown exact selon le format spécifié
-        markdown_template = f"""---
-# --- Informations de Base sur le Produit ---
-name: '{product_data.get("name", "")}'
-brand: '{product_data.get("brand", "")}'
-model: '{product_data.get("model", "")}'
-image: '{product_data.get("image", "https://via.placeholder.com/600x400")}' # Placeholder image
-amazonASIN: '{product_data.get("amazonASIN", "PRODUCT_ASIN_PLACEHOLDER")}' # Placeholder ASIN
-publishDate: {product_data.get("publishDate", datetime.now().strftime('%Y-%m-%d'))}
-updateDate: {product_data.get("updateDate", datetime.now().strftime('%Y-%m-%d'))}
-draft: {str(product_data.get("draft", False)).lower()}
 
-# --- Étape 2 : Accroche ---
-title: '{product_data.get("title", "")}'
-hookIntro: '{product_data.get("hookIntro", "")}'
+        # Fallback pour les dates si non fournies par l'IA ou si le format est incorrect
+        default_date_str = datetime.now().strftime('%Y-%m-%d')
+        publish_date_str = product_data.get("publishDate", default_date_str)
+        update_date_str = product_data.get("updateDate", default_date_str)
+        try:
+            datetime.strptime(publish_date_str, '%Y-%m-%d')
+        except ValueError:
+            publish_date_str = default_date_str
+        try:
+            datetime.strptime(update_date_str, '%Y-%m-%d')
+        except ValueError:
+            update_date_str = default_date_str
 
-# --- Étape 3 : Bénéfices Clés ---
-keyBenefits:"""
+
+        image_url = product_data.get("image")
+        if not image_url: # Assurer un placeholder si vide
+            image_url = "https://via.placeholder.com/600x400.png"
         
-        # Ajouter les bénéfices
+        # Construction du frontmatter YAML
+        # L'ordre des champs est important ici.
+        frontmatter_lines = [
+            f"name: '{ProductScraper._escape_yaml_string(product_data.get('name', ''))}'",
+            f"brand: '{ProductScraper._escape_yaml_string(product_data.get('brand', ''))}'",
+            f"model: '{ProductScraper._escape_yaml_string(product_data.get('model', ''))}'",
+            f"image: '{ProductScraper._escape_yaml_string(image_url)}'",
+            f"amazonASIN: '{ProductScraper._escape_yaml_string(product_data.get('amazonASIN', 'ASIN_PLACEHOLDER'))}'",
+            f"publishDate: {publish_date_str}", 
+            f"updateDate: {update_date_str}",   
+            f"draft: {str(product_data.get('draft', False)).lower()}", 
+            f"title: '{ProductScraper._escape_yaml_string(product_data.get('title', ''))}'",
+            f"hookIntro: '{ProductScraper._escape_yaml_string(product_data.get('hookIntro', ''))}'",
+        ]
+
+        frontmatter_lines.append("keyBenefits:")
         for benefit in product_data.get("keyBenefits", []):
-            markdown_template += f"\n  - '{benefit}'"
-        
-        markdown_template += f"""
+            frontmatter_lines.append(f"  - '{ProductScraper._escape_yaml_string(benefit)}'")
 
-# --- Étape 4 : Caractéristiques Pertinentes ---
-keyFeatures:"""
-        
-        # Ajouter les caractéristiques
+        frontmatter_lines.append("keyFeatures:")
         for feature in product_data.get("keyFeatures", []):
-            markdown_template += f"\n  - '{feature}'"
+            frontmatter_lines.append(f"  - '{ProductScraper._escape_yaml_string(feature)}'")
         
-        markdown_template += f"""
-detailedSpecs: '{product_data.get("detailedSpecs", "")}'
+        frontmatter_lines.extend([
+            f"detailedSpecs: '{ProductScraper._escape_yaml_string(product_data.get('detailedSpecs', ''))}'",
+            f"ctaText: '{ProductScraper._escape_yaml_string(product_data.get('ctaText', ''))}'",
+            f"affiliateLink: '{ProductScraper._escape_yaml_string(product_data.get('affiliateLink', ''))}'",
+            f"category: '{ProductScraper._escape_yaml_string(product_data.get('category', ''))}'",
+        ])
 
-# --- Étape 6 : Appel à l'Action ---
-ctaText: '{product_data.get("ctaText", "")}'
-affiliateLink: '{product_data.get("affiliateLink", "")}' # Placeholder link
+        frontmatter_lines.append("tags:")
+        for tag in product_data.get("tags", []):
+            frontmatter_lines.append(f"  - '{ProductScraper._escape_yaml_string(tag)}'")
 
-# --- Étape 7 : Optimisation & Catégorisation ---
-category: '{product_data.get("category", "")}'
-tags: {product_data.get("tags", [])}
+        markdown_template = "---\n" + "\n".join(frontmatter_lines) + "\n---\n\n"
 
----
+        # Corps MDX
+        # Utilisation de product_data.get() pour la robustesse, et _escape_yaml_string pour les chaînes insérées.
+        # Note: l'utilisation de product_data.get("image", "") directement dans le texte est inhabituelle
+        # et pourrait nécessiter un post-traitement ou une variable spécifique si l'URL doit être affichée.
+        # Ici, on suit la demande de mettre l'URL de l'image directement.
+        
+        # Construction des éléments JSX pour keyFeatures
+        key_features_list_items = ""
+        if product_data.get("keyFeatures"):
+            for feature in product_data.get("keyFeatures"):
+                # S'assurer que le contenu de la feature est bien échappé pour JSX si besoin,
+                # mais ici on suppose qu'il s'agit de texte simple.
+                # Pour être sûr, on pourrait échapper les caractères spéciaux JSX comme { } < >
+                # mais pour des strings simples, ce n'est souvent pas nécessaire.
+                # L'échappement YAML a déjà géré les apostrophes.
+                clean_feature = str(feature).replace('{', '{{').replace('}', '}}') # Basic JSX escaping for text nodes
+                key_features_list_items += f"      <li key={{{repr(clean_feature[:20])}}}>{clean_feature}</li>\n" # key simple pour l'exemple
 
-## Le {product_data.get("brand", "")} {product_data.get("model", "")} : Immersion et Performance au Rendez-vous
+        key_features_mdx = f"""{{frontmatter.keyFeatures && (
+  <ul>
+    {{frontmatter.keyFeatures.map((feature, index) => (
+      <li key={{index}}>
+        {{feature}}
+      </li>
+    ))}}
+  </ul>
+)}}"""
+        # Correction: Le template JSX doit utiliser les variables du frontmatter, pas celles construites en Python.
+        # Donc, la construction de key_features_list_items n'est pas utilisée directement ici si on suit le modèle JSX.
+        # Le template JSX pour keyFeatures est correct en utilisant frontmatter.keyFeatures.
 
-Plongez au cœur de l'action avec le **{{frontmatter.name}}**. Ce produit est une invitation à redécouvrir vos expériences avec une qualité et une performance époustouflantes. Comme nous l'avons souligné : **{{frontmatter.hookIntro}}**
+        social_proof_text = ProductScraper._escape_yaml_string(product_data.get("socialProof", "Information non disponible"))
+        warranty_info_text = ProductScraper._escape_yaml_string(product_data.get("warrantyInfo", "Information non disponible"))
 
-### Atouts Majeurs pour une Expérience Inégalée
 
-Le {product_data.get("brand", "")} {product_data.get("model", "")} est conçu pour la performance :
+        markdown_template += f"## Pourquoi choisir le {product_data.get('brand', '')} {product_data.get('model', '')} ?\n\n"
+        # Attention à product_data.get('image', '') directement dans le texte.
+        # Si c'est une URL, elle sera juste imprimée. Si le MDX doit la traiter comme une image, il faudrait un ![]().
+        # La demande est de mettre `product_data.get("image", "")` donc on le fait.
+        hook_intro_escaped_for_body = ProductScraper._escape_yaml_string(product_data.get("hookIntro", ""))
+        markdown_template += f"Si vous cherchez à améliorer votre expérience de jeu sans vous ruiner, le **{product_data.get('image', '')}** mérite toute votre attention. Comme mentionné dans notre introduction : **{hook_intro_escaped_for_body}**\n\n"
+        
+        markdown_template += "### Atouts Majeurs pour une Expérience Inégalée\n\n"
+        # keyBenefits rendering (inchangé, utilise le JSX fourni précédemment)
+        markdown_template += """{frontmatter.keyBenefits && (
+  <ul>
+    {frontmatter.keyBenefits.map((benefit, index) => (
+      <li key={index}>
+        <strong>{benefit.split(':')[0].trim()} :</strong> {benefit.split(':')[1].trim()}
+      </li>
+    ))}
+  </ul>
+)}
 
-{{frontmatter.keyBenefits.map((benefit) => (
-  - **${{benefit.split(':')[0].trim()}} :** ${{benefit.split(':')[1].trim()}}
-))}}
+"""
+        markdown_template += f"### Caractéristiques Techniques qui Comptent\n\n{key_features_mdx}\n\n"
+        
+        detailed_specs_escaped_for_body = ProductScraper._escape_yaml_string(product_data.get('detailedSpecs', ''))
+        markdown_template += f"**{detailed_specs_escaped_for_body}**\n\n"
 
-### Spécifications Techniques Détaillées
+        markdown_template += f"### Ce qu'il Faut Savoir Avant d'Acheter\n\nCe modèle est **{social_proof_text}**. De plus, la tranquillité d'esprit est souvent assurée car il **{warranty_info_text}** (vérifiez les conditions spécifiques lors de l'achat).\n\n"
 
-Les caractéristiques techniques de ce produit parlent d'elles-mêmes :
-
-{{frontmatter.keyFeatures.map((feature) => (
-  - ${{feature}}
-))}}
-
-**{{frontmatter.detailedSpecs}}**
-
-### Prêt à Transformer Votre Expérience ?
-
-Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'un simple produit, c'est une pièce maîtresse pour tout setup sérieux. Il allie design, performance et technologies de pointe pour satisfaire les utilisateurs les plus exigeants.
-
-{{/* Le bouton CTA principal - Stylez-le via CSS */}}
-<a href={{frontmatter.affiliateLink}} target="_blank" rel="sponsored noopener noreferrer" class="cta-button">
-  {{frontmatter.ctaText}}
-</a>
-
-*En tant que Partenaire Amazon, je réalise un bénéfice sur les achats remplissant les conditions requises.*"""
+        markdown_template += "### Verdict et Où l'Acheter\n\n"
+        markdown_template += f"Le {product_data.get('brand', '')} {product_data.get('model', '')} est plus qu'un simple produit, c'est une pièce maîtresse pour tout setup sérieux. Il allie design, performance et technologies de pointe pour satisfaire les utilisateurs les plus exigeants.\n\n"
+        markdown_template += "{/* Le bouton CTA principal - Stylez-le via CSS */}\n"
+        markdown_template += "<a href={frontmatter.affiliateLink} target=\"_blank\" rel=\"sponsored noopener noreferrer\" class=\"cta-button\">\n"
+        markdown_template += "  {frontmatter.ctaText}\n"
+        markdown_template += "</a>\n\n"
+        markdown_template += "*En tant que Partenaire Amazon, je réalise un bénéfice sur les achats remplissant les conditions requises.*\n"
 
         return markdown_template
 
@@ -359,7 +420,7 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
         print(f"🚀 Traitement de l'URL : {url}")
         
         # Scraper l'article
-        article_data = self.scrape_article(url)
+        article_data = self.scrape_article(url) # Contient 'url', 'title', 'content', 'image_url', 'raw_html'
         
         if article_data is None:
             print(f"❌ Impossible de récupérer l'article de {url}")
@@ -368,7 +429,8 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
         print(f"✅ Article récupéré avec succès : {article_data['title']}")
         
         # Générer la fiche produit
-        product_sheet = self.generate_product_sheet(article_data)
+        # On doit s'assurer que article_data['url'] est passé pour le canonical link
+        product_sheet = self.generate_product_sheet(article_data) # article_data est passé ici
         
         return product_sheet
 
@@ -385,8 +447,8 @@ Le {product_data.get("brand", "")} {product_data.get("model", "")} est plus qu'u
             product_sheet = self.process_single_url(url)
             
             if product_sheet:
-                # Laisser save_to_file générer le nom basé sur brand et model
-                filepath = self.save_to_file(product_sheet)
+                
+                filepath = self.save_to_file(product_sheet) 
                 
                 if filepath:
                     results.append({
